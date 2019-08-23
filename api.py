@@ -1,19 +1,20 @@
 import datetime
-import uuid
 import os
-import jwt
 from functools import wraps
+
+import jwt
 from flask import Flask, request, jsonify, make_response
+from google.cloud import firestore
 from werkzeug.security import generate_password_hash, check_password_hash
+
+from lib.classes import User
 from models import *
 
 app = Flask(__name__)
 
 app.config['SECRET_KEY'] = os.getenv('SUKKIRI_SECRET_KEY')
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('SUKKIRI_DATABASE_URI')
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-db.init_app(app)
+db = firestore.Client()
 
 
 def token_required(f):
@@ -29,7 +30,8 @@ def token_required(f):
 
         try:
             data = jwt.decode(token, app.config['SECRET_KEY'])
-            current_user = db.session.query(User).filter_by(public_id=data['public_id']).first()
+            current_user_doc = db.collection('users').document(data['public_id']).get()
+            current_user = current_user_doc.to_dict()
         except:
             return jsonify({'message': 'Token is invalid!'}), 401
 
@@ -341,16 +343,18 @@ def delete_product(current_user, product_id):
 @app.route('/api/users', methods=['GET'])
 @token_required
 def get_all_users(current_user):
-    if not current_user.role == 'admin':
+    if not current_user['role'] == 'admin':
         return jsonify({'message': 'Invalid permissions'})
 
-    users = db.session.query(User).all()
+    users = db.collection('users').get()
 
     output = []
 
     for user in users:
-        user_data = {'public_id': user.public_id, 'username': user.username, 'first_name': user.first_name,
-                     'last_name': user.last_name, 'email': user.email, 'role': user.role}
+        user = user.to_dict()
+        user_data = {'public_id': user['public_id'], 'username': user['username'], 'first_name': user['first_name'],
+                     'last_name': user['last_name'], 'email': user['email'],
+                     'role': user['role']}
         output.append(user_data)
     return jsonify({'users': output})
 
@@ -358,63 +362,69 @@ def get_all_users(current_user):
 @app.route('/api/users', methods=['POST'])
 @token_required
 def create_new_user(current_user):
-    if not current_user.role == 'admin':
+    if not current_user['role'] == 'admin':
         return jsonify({'message': 'Invalid permissions'})
 
     data = request.get_json()
 
-    hashed_password = generate_password_hash(data['password'], method='sha256')
+    if 'username' not in data or 'password' not in data or 'role' not in data:
+        return jsonify({'message': 'Invalid input data'})
 
-    new_user = User(public_id=str(uuid.uuid4()), email=data['email'], username=data['username'],
-                    first_name=data['first_name'], last_name=data['last_name'], password_hash=hashed_password,
+    new_user = User(email=data['email'] if 'email' in data else None,
+                    username=data['username'],
+                    password=data['password'],
+                    first_name=data['first_name'] if 'first_name' in data else None,
+                    last_name=data['last_name'] if 'last_name' in data else None,
                     role=data['role'])
-    db.session.add(new_user)
-    db.session.commit()
+
+    db.collection('users').document(new_user.public_id).set(new_user.to_dict())
+
     return jsonify({'message': 'New user created!'})
 
 
 @app.route('/api/users/<user_public_id>', methods=['GET'])
 @token_required
 def get_user(current_user, user_public_id):
-    if not current_user.role == 'admin':
+    if not current_user['role'] == 'admin':
         return jsonify({'message': 'Invalid permissions'})
 
-    user = db.session.query(User).filter_by(public_id=user_public_id).first()
+    user_doc = db.collection('users').document(user_public_id).get()
 
-    if not user:
+    try:
+        user = user_doc.to_dict()
+        user_data = {'public_id': user['public_id'], 'username': user['username'], 'first_name': user['first_name'],
+                     'last_name': user['last_name'], 'email': user['email'], 'role': user['role']}
+        return jsonify({'user': user_data})
+    except:
         return jsonify({'message': 'No user found!'})
-
-    user_data = {'public_id': user.public_id, 'username': user.username, 'first_name': user.first_name,
-                 'last_name': user.last_name, 'email': user.email, 'role': user.role}
-
-    return jsonify({'user': user_data})
 
 
 @app.route('/api/users/<user_public_id>', methods=['PUT'])
 @token_required
 def modify_user(current_user, user_public_id):
-    if not current_user.role == 'admin':
+    if not current_user['role'] == 'admin':
         return jsonify({'message': 'Invalid permissions'})
 
     data = request.get_json()
-    user = db.session.query(User).filter_by(public_id=user_public_id).first()
 
-    if not user:
+    user_doc = db.collection('users').document(user_public_id)
+
+    try:
+        updated_info = dict()
+        if 'email' in data:
+            updated_info['email'] = data['email']
+        if 'first_name' in data:
+            updated_info['first_name'] = data['first_name']
+        if 'last_name' in data:
+            updated_info['last_name'] = data['last_name']
+        if 'role' in data:
+            updated_info['role'] = data['role']
+        if 'password' in data:
+            updated_info['password'] = generate_password_hash(data['password'], method='SHA256')
+        if updated_info:
+            user_doc.update(updated_info)
+    except:
         return jsonify({'message': 'No user found!'})
-
-    if 'first_name' in data:
-        user.first_name = data['first_name']
-    if 'last_name' in data:
-        user.last_name = data['last_name']
-    if 'email' in data:
-        user.email = data['email']
-    if 'role' in data:
-        user.role = data['role']
-    if 'password' in data:
-        hashed_password = generate_password_hash(data['password'], method='sha256')
-        user.password = hashed_password
-
-    db.session.commit()
 
     return jsonify({'message': 'User modified successfully!'})
 
@@ -422,18 +432,16 @@ def modify_user(current_user, user_public_id):
 @app.route('/api/users/<user_public_id>', methods=['DELETE'])
 @token_required
 def delete_user(current_user, user_public_id):
-    if not current_user.role == 'admin':
+    if not current_user['role'] == 'admin':
         return jsonify({'message': 'Invalid permissions'})
 
-    user = db.session.query(User).filter_by(public_id=user_public_id).first()
+    user_doc = db.collection('users').document(user_public_id)
 
-    if not user:
+    try:
+        user_doc.delete()
+        return jsonify({'message': 'User deleted successfully!'})
+    except:
         return jsonify({'message': 'No user found!'})
-
-    db.session.delete(user)
-    db.session.commit()
-
-    return jsonify({'message': 'User deleted successfully!'})
 
 
 @app.route('/api/auth')
@@ -443,18 +451,19 @@ def login():
     if not auth or not auth.username or not auth.password:
         return make_response('Could not verify', 401, {'WWW-Authenticate': 'Basic realm="Login Required!"'})
 
-    user = db.session.query(User).filter_by(username=auth.username).first()
+    user_doc = db.collection('users').where('username', '==', auth.username).limit(1).get()
+    try:
+        for user in user_doc:
+            user = user.to_dict()
+        if check_password_hash(user['password'], auth.password):
+            token = jwt.encode(
+                {'public_id': user['public_id'], 'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)},
+                app.config['SECRET_KEY'])
+            return jsonify({'token': token.decode('UTF-8')})
 
-    if not user:
         return make_response('Could not verify', 401, {'WWW-Authenticate': 'Basic realm="Login Required!"'})
-
-    if check_password_hash(user.password_hash, auth.password):
-        token = jwt.encode(
-            {'public_id': user.public_id, 'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)},
-            app.config['SECRET_KEY'])
-        return jsonify({'token': token.decode('UTF-8')})
-
-    return make_response('Could not verify', 401, {'WWW-Authenticate': 'Basic realm="Login Required!"'})
+    except:
+        return make_response('Could not verify', 401, {'WWW-Authenticate': 'Basic realm="Login Required!"'})
 
 
 if __name__ == '__main__':

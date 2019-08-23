@@ -4,29 +4,7 @@ from flask_sqlalchemy import SQLAlchemy
 db = SQLAlchemy()
 
 
-class User(db.Model):
-    __tablename__ = 'users'
 
-    id = db.Column(db.Integer, primary_key=True)
-    public_id = db.Column(db.String(50), unique=True)
-    email = db.Column(db.String(60), index=True, unique=True)
-    username = db.Column(db.String(60), index=True, unique=True)
-    first_name = db.Column(db.String(60))
-    last_name = db.Column(db.String(60))
-    password_hash = db.Column(db.String(128))
-    role = db.Column(db.String(60))
-
-
-class DistributionCompany(db.Model):
-    __tablename__ = 'dist_companies'
-
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(60), unique=True)
-    email = db.Column(db.String(60))
-    address = db.Column(db.String(200))
-    hours = db.Column(db.String(13))
-    contact_name = db.Column(db.String(60))
-    phone = db.Column(db.String(60))
 
 class Product(db.Model):
     __tablename__ = 'products'
