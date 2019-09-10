@@ -1,23 +1,21 @@
-import sys
+from google.cloud import firestore
 
-import mysql.connector
-from werkzeug.security import generate_password_hash
+from lib.classes import User
 
-mydb = mysql.connector.connect(
-    host="localhost",
-    user=sys.argv[2],
-    passwd=str(sys.argv[3]),
-    database=sys.argv[1]
-)
+email = input("Admin email:")
+username = input("Admin username:")
+password = input("Admin password:")
+first_name = input("Admin first name:")
+last_name = input("Admin last name:")
 
-mycursor = mydb.cursor()
+new_user = User(email=email if 'email' in email else None,
+                username=username,
+                password=password,
+                first_name=first_name if 'first_name' in first_name else None,
+                last_name=last_name if 'last_name' in last_name else None,
+                role="admin")
 
-hashed_password = generate_password_hash(sys.argv[5], method='sha256')
+db = firestore.Client()
+db.collection('users').document(new_user.public_id).set(new_user.to_dict())
 
-sql = "INSERT INTO users (username, password_hash, role) VALUES (%s, %s, %s)"
-val = (sys.argv[4], hashed_password, 'admin')
-mycursor.execute(sql, val)
-
-mydb.commit()
-
-print(mycursor.rowcount, "User created successfully!")
+print("User created successfully!")

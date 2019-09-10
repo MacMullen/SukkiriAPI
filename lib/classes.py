@@ -1,5 +1,6 @@
 # lib/classes.py
 
+import datetime
 import uuid
 
 from werkzeug.security import generate_password_hash
@@ -64,3 +65,71 @@ class DistributionCompany(object):
                 self.hours,
                 self.contact_name,
                 self.phone))
+
+
+class RMACase(object):
+    def __init__(self, case_id, brand, model, problem, serial_number, distribution_company, current_user):
+        self.id = case_id
+        self.brand = brand
+        self.model = model
+        self.problem = problem
+        self.serial_number = serial_number
+        self.distribution_company = distribution_company
+        self.to_be_revised_by = current_user
+        self.status = 'to_be_revised'
+        self.to_be_revised_date = datetime.datetime.now()
+        self.sent_date = None
+        self.returned_date = None
+        self.resolved_date = None
+        self.unresolved_date = None
+        self.to_be_sent_date = None
+        self.to_be_sent_by = None
+        self.sent_by = None
+        self.returned_by = None
+        self.resolved_by = None
+        self.unresolved_by = None
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'brand': self.brand,
+            'model': self.model,
+            'problem': self.problem,
+            'serial_number': self.serial_number,
+            'distribution_company': self.distribution_company,
+            'sent_date': self.sent_date,
+            'returned_date': self.returned_date,
+            'resolved_date': self.resolved_date,
+            'status': self.status,
+            'to_be_revised_date': self.to_be_revised_date,
+            'unresolved_date': self.unresolved_date,
+            'to_be_sent_date': self.to_be_sent_date,
+            'to_be_revised_by': self.to_be_revised_by,
+            'to_be_sent_by': self.to_be_sent_by,
+            'sent_by': self.sent_by,
+            'returned_by': self.returned_by,
+            'resolved_by': self.resolved_by,
+            'unresolved_by': self.unresolved_by
+        }
+
+
+class Product(object):
+    def __init__(self, brand, model, description, stock, stock_under_control, distribution_company, ean):
+        self.brand = brand
+        self.model = model
+        self.description = description
+        self.stock = stock
+        self.stock_under_control = stock_under_control
+        self.distribution_company = distribution_company
+        self.ean = ean
+
+    def to_dict(self):
+        return {
+            'brand': self.brand,
+            'model': self.model,
+            'description': self.description,
+            'stock': self.stock,
+            'stock_under_control': self.stock_under_control,
+            'distribution_company': self.distribution_company,
+            'ean': self.ean
+        }

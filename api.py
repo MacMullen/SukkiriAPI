@@ -1,14 +1,12 @@
 import datetime
 import os
-from functools import wraps
-
+import uuid
 import jwt
+from functools import wraps
 from flask import Flask, request, jsonify, make_response
 from google.cloud import firestore
 from werkzeug.security import generate_password_hash, check_password_hash
-
-from lib.classes import User
-from models import *
+from lib.classes import User, RMACase, Product, DistributionCompany
 
 app = Flask(__name__)
 
@@ -40,109 +38,122 @@ def token_required(f):
     return decorated
 
 
-@app.route('/api/rma_products', methods=['GET'])
+@app.route('/api/rma_cases', methods=['GET'])
 @token_required
-def get_all_rma_products(current_user):
-    rma_products = db.session.query(RMAProduct).all()
+def get_all_rma_cases(current_user):
+    rma_cases = db.collection('rma_cases').get()
 
     output = []
 
-    for rma_product in rma_products:
-        rma_product_data = {'id': rma_product.id, 'brand': rma_product.brand, 'model': rma_product.model,
-                            'problem': rma_product.problem, 'serial_number': rma_product.serial_number,
-                            'distribution_company': rma_product.distribution_company,
-                            'sent_date': rma_product.sent_date, 'returned_date': rma_product.sent_date,
-                            'resolved_date': rma_product.resolved_date, 'status': rma_product.status,
-                            'to_be_revised_date': rma_product.to_be_revised_date,
-                            'unresolved_date': rma_product.unresolved_date,
-                            'to_be_sent_date': rma_product.to_be_sent_date,
-                            'to_be_revised_by': rma_product.to_be_revised_by,
-                            'to_be_sent_by': rma_product.to_be_sent_by, 'sent_by': rma_product.sent_by,
-                            'returned_by': rma_product.returned_by,
-                            'resolved_by': rma_product.resolved_by, 'unresolved_by': rma_product.unresolved_by}
-        output.append(rma_product_data)
-    return jsonify({'rma_products': output})
+    for rma_case in rma_cases:
+        rma_case = rma_case.to_dict()
+        rma_case_data = {'id': rma_case["id"], 'brand': rma_case["brand"], 'model': rma_case["model"],
+                         'problem': rma_case["problem"], 'serial_number': rma_case["serial_number"],
+                         'distribution_company': rma_case["distribution_company"],
+                         'sent_date': rma_case["sent_date"], 'returned_date': rma_case["sent_date"],
+                         'resolved_date': rma_case["resolved_date"], 'status': rma_case["status"],
+                         'to_be_revised_date': rma_case["to_be_revised_date"],
+                         'unresolved_date': rma_case["unresolved_date"],
+                         'to_be_sent_date': rma_case["to_be_sent_date"],
+                         'to_be_revised_by': rma_case["to_be_revised_by"],
+                         'to_be_sent_by': rma_case["to_be_sent_by"], 'sent_by': rma_case["sent_by"],
+                         'returned_by': rma_case["returned_by"],
+                         'resolved_by': rma_case["resolved_by"], 'unresolved_by': rma_case["unresolved_by"]}
+        output.append(rma_case_data)
+    return jsonify({'rma_cases': output})
 
 
-@app.route('/api/rma_products', methods=['POST'])
+@app.route('/api/rma_cases', methods=['POST'])
 @token_required
-def create_new_rma_product(current_user):
+def create_new_rma_case(current_user):
     data = request.get_json()
 
-    new_rma_product = RMAProduct(brand=data['brand'], model=data['model'], problem=data['problem'],
-                                 serial_number=data['serial_number'], distribution_company=data['distribution_company'],
-                                 sent_date=data['sent_date'], returned_date=data['returned_date'],
-                                 resolved_date=data['resolved_date'], status=data['status'],
-                                 to_be_revised_date=data['to_be_revised_date'],
-                                 unresolved_date=data['unresolved_date'], to_be_sent_date=data['to_be_sent_date'],
-                                 to_be_revised_by=data['to_be_revised_by'], to_be_sent_by=data['to_be_sent_by'],
-                                 sent_by=data['sent_by'], returned_by=data['returned_by'],
-                                 resolved_by=data['resolved_by'], unresolved_by=data['unresolved_by'])
+    new_id = str(uuid.uuid4())[:6]
+    rma_case = db.collection('rma_cases').document(new_id).get().to_dict()
+    while rma_case is not None:
+        new_id = str(uuid.uuid4())[:6]
+        rma_case = db.collection('rma_cases').get().to_dict()
+
+    new_rma_case = RMACase(case_id=new_id, brand=data['brand'], model=data['model'], problem=data['problem'],
+                           serial_number=data['serial_number'], distribution_company=data['distribution_company'],
+                           current_user=current_user["first_name"] + ' ' + current_user["last_name"])
 
     try:
-        db.session.add(new_rma_product)
-        db.session.commit()
-        return jsonify({'message': 'New distribution company created!'})
+        db.collection('rma_cases').document(new_rma_case.id).set(new_rma_case.to_dict())
+        return jsonify({'message': 'RMA case created successfully!', 'id': new_id})
     except:
-        return jsonify({'message': 'Could not add RMA product into database'})
+        return jsonify({'message': 'Could not create the RMA case.'})
 
 
-@app.route('/api/rma_products/<rma_product_id>', methods=['GET'])
+@app.route('/api/rma_cases/<rma_case_id>', methods=['GET'])
 @token_required
-def get_rma_product(current_user, rma_product_id):
-    rma_product = db.session.query(RMAProduct).filter_by(id=rma_product_id).first()
+def get_rma_case(current_user, rma_case_id):
+    rma_case = db.collection('rma_cases').document(rma_case_id).get().to_dict()
 
-    if not rma_product:
-        return jsonify({'message': 'No RMA product found!'})
+    if rma_case is None:
+        return jsonify({'message': 'No RMA case found with that id!'})
+    else:
+        rma_case_data = {'id': rma_case["id"], 'brand': rma_case["brand"], 'model': rma_case["model"],
+                         'problem': rma_case["problem"], 'serial_number': rma_case["serial_number"],
+                         'distribution_company': rma_case["distribution_company"],
+                         'sent_date': rma_case["sent_date"], 'returned_date': rma_case["sent_date"],
+                         'resolved_date': rma_case["resolved_date"], 'status': rma_case["status"],
+                         'to_be_revised_date': rma_case["to_be_revised_date"],
+                         'unresolved_date': rma_case["unresolved_date"],
+                         'to_be_sent_date': rma_case["to_be_sent_date"],
+                         'to_be_revised_by': rma_case["to_be_revised_by"],
+                         'to_be_sent_by': rma_case["to_be_sent_by"], 'sent_by': rma_case["sent_by"],
+                         'returned_by': rma_case["returned_by"],
+                         'resolved_by': rma_case["resolved_by"], 'unresolved_by': rma_case["unresolved_by"]}
 
-    rma_product_data = {'id': rma_product.id, 'brand': rma_product.brand, 'model': rma_product.model,
-                        'problem': rma_product.problem, 'serial_number': rma_product.serial_number,
-                        'distribution_company': rma_product.distribution_company,
-                        'sent_date': rma_product.sent_date, 'returned_date': rma_product.sent_date,
-                        'resolved_date': rma_product.resolved_date, 'status': rma_product.status,
-                        'to_be_revised_date': rma_product.to_be_revised_date,
-                        'unresolved_date': rma_product.unresolved_date,
-                        'to_be_sent_date': rma_product.to_be_sent_date,
-                        'to_be_revised_by': rma_product.to_be_revised_by,
-                        'to_be_sent_by': rma_product.to_be_sent_by, 'sent_by': rma_product.sent_by,
-                        'returned_by': rma_product.returned_by,
-                        'resolved_by': rma_product.resolved_by, 'unresolved_by': rma_product.unresolved_by}
-
-    return jsonify({'rma_product': rma_product_data})
+        return jsonify({'rma_case': rma_case_data})
 
 
-@app.route('/api/rma_products/<rma_product_id>', methods=['PUT'])
+@app.route('/api/rma_cases/<rma_case_id>/<new_status>', methods=['POST'])
 @token_required
-def modify_rma_product(current_user, rma_product_id):
-    rma_product = db.session.query(RMAProduct).filter_by(id=rma_product_id).first()
+def modify_rma_case(current_user, rma_case_id, new_status):
+    if current_user["role"] != ('admin' or 'rma_technician'):
+        return jsonify({'message': 'Not authorized to change a RMA case status.'})
 
-    if not rma_product:
-        return jsonify({'message': 'No RMA product found!'})
+    try:
+        rma_case_doc = db.collection('rma_cases').document(rma_case_id)
 
-    data = request.get_json()
+        rma_case = rma_case_doc.get().to_dict()
 
-    rma_product.brand = data['brand']
-    rma_product.model = data['model']
-    rma_product.problem = data['problem']
-    rma_product.serial_number = data['serial_number']
-    rma_product.distribution_company = data['distribution_company']
-    rma_product.sent_date = data['sent_date']
-    rma_product.returned_date = data['returned_date']
-    rma_product.resolved_date = data['resolved_date']
-    rma_product.status = data['status']
-    rma_product.to_be_revised_date = data['to_be_revised_date']
-    rma_product.unresolved_date = data['unresolved_date']
-    rma_product.to_be_sent_date = data['to_be_sent_date']
-    rma_product.to_be_revised_by = data['to_be_revised_by']
-    rma_product.to_be_sent_by = data['to_be_sent_by']
-    rma_product.sent_by = data['sent_by']
-    rma_product.returned_by = data['returned_by']
-    rma_product.resolved_by = data['resolved_by']
-    rma_product.unresolved_by = data['unresolved_by']
+        if new_status not in ['to_be_sent', 'sent', 'returned', 'resolved', 'unresolved']:
+            return jsonify({'message': 'Not a valid status'})
 
-    db.session.commit()
+        updated_info = dict()
 
-    return jsonify({'message': 'RMA product modified successfully!'})
+        if new_status == 'to_be_sent' and rma_case["status"] == 'to_be_revised':
+            updated_info['status'] = 'to_be_sent'
+            updated_info['to_be_sent_by'] = current_user["first_name"] + ' ' + current_user["last_name"]
+            updated_info['to_be_sent_date'] = datetime.datetime.now()
+        elif new_status == 'sent' and rma_case["status"] == 'to_be_sent':
+            updated_info['status'] = 'sent'
+            updated_info['sent_by'] = current_user["first_name"] + ' ' + current_user["last_name"]
+            updated_info['sent_date'] = datetime.datetime.now()
+        elif new_status == 'returned' and rma_case["status"] == 'sent':
+            updated_info['status'] = 'returned'
+            updated_info['returned_by'] = current_user["first_name"] + ' ' + current_user["last_name"]
+            updated_info['returned_date'] = datetime.datetime.now()
+        elif new_status == 'resolved' and rma_case["status"] == ('returned' or 'to_be_revised'):
+            updated_info['status'] = 'resolved'
+            updated_info['resolved_by'] = current_user["first_name"] + ' ' + current_user["last_name"]
+            updated_info['resolved_date'] = datetime.datetime.now()
+        elif new_status == 'unresolved' and rma_case["status"] == ('returned' or 'to_be_revised'):
+            updated_info['status'] = 'unresolved'
+            updated_info['unresolved_by'] = current_user["first_name"] + ' ' + current_user["last_name"]
+            updated_info['unresolved_date'] = datetime.datetime.now()
+        else:
+            return jsonify({'message': 'Not a valid new status'})
+
+        if updated_info:
+            rma_case_doc.update(updated_info)
+
+        return jsonify({'message': 'RMA case modified successfully!'})
+    except:
+        return jsonify({'message': 'No RMA case found'})
 
 
 @app.route('/api/dist_companies', methods=['GET'])
@@ -232,15 +243,16 @@ def delete_dist_company(current_user, dist_company_id):
 @app.route('/api/products', methods=['GET'])
 @token_required
 def get_all_products(current_user):
-    products = db.session.query(Product).all()
+    products_docs = db.collection('products').get()
 
     output = []
 
-    for product in products:
-        product_data = {'id': product.id, 'brand': product.brand, 'model': product.model,
-                        'description': product.description, 'stock': product.stock,
-                        'stock_under_control': product.stock_under_control,
-                        'distribution_company': product.distribution_company, 'ean': product.ean}
+    for product in products_docs:
+        product = product.to_dict()
+        product_data = {'id': product['id'], 'brand': product['brand'], 'model': product['model'],
+                        'description': product['description'], 'stock': product['stock'],
+                        'stock_under_control': product['stock_under_control'],
+                        'distribution_company': product['distribution_company'], 'ean': product['ean']}
         output.append(product_data)
     return jsonify({'products': output})
 
@@ -250,30 +262,50 @@ def get_all_products(current_user):
 def create_new_product(current_user):
     data = request.get_json()
 
+    # Check if product already exists.
+    product = db.collection('products').document(data['brand'] + ' ' + data['model']).get().to_dict()
+
+    if product:
+        return jsonify({'message': 'That product already exists'})
+
+    if not data['brand']:
+        return jsonify({'message': 'Product must have a brand'})
+    if not data['model']:
+        return jsonify({'message': 'Product must have a model'})
+    if not data['description']:
+        data['description'] = ""
+    if not data['stock']:
+        data['stock'] = 0
+    if not data['stock_under_control']:
+        data['stock_under_control'] = False
+    if not data['ean']:
+        data['ean'] = ""
+    if not data['distribution_company']:
+        data['distribution_company'] = ""
+
     new_product = Product(brand=data['brand'], model=data['model'], description=data['description'],
-                          stock=int(data['stock']), stock_under_control=bool(data['stock_under_control']),
+                          stock=data['stock'], stock_under_control=data['stock_under_control'],
                           distribution_company=data['distribution_company'], ean=data['ean'])
 
     try:
-        db.session.add(new_product)
-        db.session.commit()
-        return jsonify({'message': 'New product created!'})
+        db.collection('products').document(new_product.brand + ' ' + new_product.model).set(new_product.to_dict())
+        return jsonify({'message': 'Product added successfully!'})
     except:
-        return jsonify({'message': 'Product already exists!'})
+        return jsonify({'message': 'Could not add the product'})
 
 
-@app.route('/api/products/<product_id>', methods=['GET'])
+@app.route('/api/products/<product_name>', methods=['GET'])
 @token_required
-def get_product(current_user, product_id):
-    product = db.session.query(Product).filter_by(id=product_id).first()
+def get_product(current_user, product_name):
+    product = db.collection('products').document(product_name).get().to_dict()
 
     if not product:
         return jsonify({'message': 'No product found!'})
 
-    product_data = {'id': product.id, 'brand': product.brand, 'model': product.model,
-                    'description': product.description, 'stock': product.stock,
-                    'stock_under_control': product.stock_under_control,
-                    'distribution_company': product.distribution_company, 'ean': product.ean}
+    product_data = {'brand': product['brand'], 'model': product['model'],
+                    'description': product['description'], 'stock': product['stock'],
+                    'stock_under_control': product['stock_under_control'],
+                    'distribution_company': product['distribution_company'], 'ean': product['ean']}
 
     return jsonify({'product': product_data})
 
@@ -467,4 +499,4 @@ def login():
 
 
 if __name__ == '__main__':
-    app.run(debug=False, host="0.0.0.0")
+    app.run(debug=True, host="0.0.0.0")
