@@ -1,11 +1,13 @@
 import datetime
 import os
 import uuid
-import jwt
 from functools import wraps
+
+import jwt
 from flask import Flask, request, jsonify, make_response
 from google.cloud import firestore
 from werkzeug.security import generate_password_hash, check_password_hash
+
 from lib.classes import User, RMACase, Product, DistributionCompany
 
 app = Flask(__name__)
@@ -159,15 +161,16 @@ def modify_rma_case(current_user, rma_case_id, new_status):
 @app.route('/api/dist_companies', methods=['GET'])
 @token_required
 def get_all_dist_companies(current_user):
-    dist_companies = db.session.query(DistributionCompany).all()
+    dist_companies = db.collection('companies').get()
 
     output = []
 
     for dist_company in dist_companies:
-        dist_company_data = {'id': dist_company.id, 'name': dist_company.name, 'email': dist_company.email,
-                             'address': dist_company.address, 'hours': dist_company.hours,
-                             'contact_name': dist_company.contact_name,
-                             'phone': dist_company.phone}
+        dist_company = dist_company.to_dict()
+        dist_company_data = {'name': dist_company['name'], 'email': dist_company['email'],
+                             'address': dist_company['address'], 'hours': dist_company['hours'],
+                             'contact_name': dist_company['contact_name'],
+                             'phone': dist_company['phone']}
         output.append(dist_company_data)
     return jsonify({'dist_companies': output})
 
@@ -177,65 +180,60 @@ def get_all_dist_companies(current_user):
 def create_new_dist_company(current_user):
     data = request.get_json()
 
+    # Check if product already exists.
+    dist_company = db.collection('companies').document(data['name']).get().to_dict()
+
+    if dist_company:
+        return jsonify({'message': 'That company already exists'})
+
     new_dist_company = DistributionCompany(name=data['name'], email=data['email'], address=data['address'],
                                            hours=data['hours'], contact_name=data['contact_name'],
                                            phone=data['phone'])
 
     try:
-        db.session.add(new_dist_company)
-        db.session.commit()
-        return jsonify({'message': 'New distribution company created!'})
+        db.collection('companies').document(new_dist_company.name).set(new_dist_company.to_dict())
+        return jsonify({'message': 'Company added successfully!'})
     except:
-        return jsonify({'message': 'Distribution company already exists!'})
+        return jsonify({'message': 'Could not add the company'})
 
 
-@app.route('/api/dist_companies/<dist_company_id>', methods=['GET'])
+@app.route('/api/dist_companies/<dist_company_name>', methods=['GET'])
 @token_required
-def get_dist_company(current_user, dist_company_id):
-    dist_company = db.session.query(DistributionCompany).filter_by(id=dist_company_id).first()
+def get_dist_company(current_user, dist_company_name):
+    dist_company = db.collection('companies').document(dist_company_name).get().to_dict()
 
     if not dist_company:
-        return jsonify({'message': 'No distribution company found!'})
+        return jsonify({'message': 'No distribution company found with that name!'})
 
-    dist_company_data = {'name': dist_company.name, 'email': dist_company.email, 'address': dist_company.address,
-                         'hours': dist_company.hours, 'contact_name': dist_company.contact_name,
-                         'phone': dist_company.phone}
-
-    return jsonify({'dist_company': dist_company_data})
+    return jsonify({'dist_company': dist_company})
 
 
-@app.route('/api/dist_companies/<dist_company_id>', methods=['PUT'])
+@app.route('/api/dist_companies/<dist_company_name>', methods=['PUT'])
 @token_required
-def modify_dist_company(current_user, dist_company_id):
-    dist_company = db.session.query(DistributionCompany).filter_by(id=dist_company_id).first()
+def modify_dist_company(current_user, dist_company_name):
+    dist_company = db.collection('companies').document(dist_company_name)
 
     if not dist_company:
-        return jsonify({'message': 'No product found!'})
+        return jsonify({'message': 'No company found with that name!'})
 
     data = request.get_json()
 
-    dist_company.name = data['name']
-    dist_company.email = data['email']
-    dist_company.address = data['address']
-    dist_company.hours = data['hours']
-    dist_company.contact_name = data['contact_name']
-    dist_company.phone = data['phone']
+    if 'name' in data:
+        return jsonify({'message': 'You can\'t change the company name'})
 
-    db.session.commit()
-
+    dist_company.update(data)
     return jsonify({'message': 'Distribution company modified successfully!'})
 
 
-@app.route('/api/dist_companies/<dist_company_id>', methods=['DELETE'])
+@app.route('/api/dist_companies/<dist_company_name>', methods=['DELETE'])
 @token_required
-def delete_dist_company(current_user, dist_company_id):
-    dist_company = db.session.query(DistributionCompany).filter_by(id=dist_company_id).first()
+def delete_dist_company(current_user, dist_company_name):
+    dist_company = db.collection('companies').document(dist_company_name)
 
-    if not dist_company:
-        return jsonify({'message': 'No distribution company found!'})
+    if not dist_company.get().to_dict():
+        return jsonify({'message': 'No company found with that name'})
 
-    db.session.delete(dist_company)
-    db.session.commit()
+    dist_company.delete()
 
     return jsonify({'message': 'Distribution company deleted successfully!'})
 
@@ -249,7 +247,7 @@ def get_all_products(current_user):
 
     for product in products_docs:
         product = product.to_dict()
-        product_data = {'id': product['id'], 'brand': product['brand'], 'model': product['model'],
+        product_data = {'brand': product['brand'], 'model': product['model'],
                         'description': product['description'], 'stock': product['stock'],
                         'stock_under_control': product['stock_under_control'],
                         'distribution_company': product['distribution_company'], 'ean': product['ean']}
@@ -313,63 +311,62 @@ def get_product(current_user, product_name):
 @app.route('/api/products/ean/<ean>', methods=['GET'])
 @token_required
 def get_product_with_ean(current_user, ean):
-    products = db.session.query(Product).filter_by(ean=ean).all()
+    products = db.collection('products').where('ean', '==', ean).get()
 
-    if len(products) == 0:
-        return jsonify({'message': 'No product found with that EAN!'})
-    elif len(products) == 1:
-        product_data = {'id': products[0].id, 'brand': products[0].brand, 'model': products[0].model,
-                        'description': products[0].description, 'stock': products[0].stock,
-                        'stock_under_control': products[0].stock_under_control,
-                        'distribution_company': products[0].distribution_company, 'ean': products[0].ean}
+    output = []
+    for product in products:
+        product = product.to_dict()
+        if not product:
+            return jsonify({'message': 'No product found with that EAN!'})
 
-        return jsonify({'product': product_data})
-    else:
-        output = []
-        for product in products:
-            product_data = {'id': product.id, 'brand': product.brand, 'model': product.model,
-                            'description': product.description, 'stock': product.stock,
-                            'stock_under_control': product.stock_under_control,
-                            'distribution_company': product.distribution_company, 'ean': product.ean}
-            output.append(product_data)
-        return jsonify({'products': output})
+        product_data = {'brand': product['brand'], 'model': product['model'],
+                        'description': product['description'], 'stock': product['stock'],
+                        'stock_under_control': product['stock_under_control'],
+                        'distribution_company': product['distribution_company'], 'ean': product['ean']}
+
+        output.append(product_data)
+
+    return jsonify({'products': output})
 
 
-@app.route('/api/products/<product_id>', methods=['PUT'])
+@app.route('/api/products/<product_name>', methods=['PUT'])
 @token_required
-def modify_product(current_user, product_id):
-    product = db.session.query(Product).filter_by(id=product_id).first()
+def modify_product(current_user, product_name):
+    product_doc = db.collection('products').document(product_name)
 
-    if not product:
+    if not product_doc.get().to_dict():
         return jsonify({'message': 'No product found!'})
 
     data = request.get_json()
 
-    product.brand = data['brand']
-    product.model = data['model']
-    product.description = data['description']
-    product.stock = int(data['stock'])
-    product.stock_under_control = bool(data['stock_under_control'])
-    product.distribution_company = data['distribution_company']
-    product.ean = data['ean']
+    updated_info = dict()
 
-    db.session.commit()
+    if 'description' in data:
+        updated_info['description'] = data['description']
+    if 'stock' in data:
+        updated_info['stock'] = data['stock']
+    if 'stock_under_control' in data:
+        updated_info['stock_under_control'] = data['stock_under_control']
+    if 'distribution_company' in data:
+        updated_info['distribution_company'] = data['distribution_company']
+    if 'ean' in data:
+        updated_info['ean'] = data['ean']
+    if updated_info:
+        product_doc.update(updated_info)
 
     return jsonify({'message': 'Product modified successfully!'})
 
 
-@app.route('/api/products/<product_id>', methods=['DELETE'])
+@app.route('/api/products/<product_name>', methods=['DELETE'])
 @token_required
-def delete_product(current_user, product_id):
-    product = db.session.query(Product).filter_by(id=product_id).first()
+def delete_product(current_user, product_name):
+    product_doc = db.collection('products').document(product_name)
 
-    if not product:
+    try:
+        product_doc.delete()
+        return jsonify({'message': 'Product deleted successfully!'})
+    except:
         return jsonify({'message': 'No product found!'})
-
-    db.session.delete(product)
-    db.session.commit()
-
-    return jsonify({'message': 'Product deleted successfully!'})
 
 
 @app.route('/api/users', methods=['GET'])
